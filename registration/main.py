@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from data.modelnet_loader_torch import ModelNetCls
 from models import pcrnet
-from src import ChamferDistance, FPSSampler, RandomSampler, SampleNet
+from src import ChamferDistance, FPSSampler, RandomSampler, SampleNet, SampleNetPlus
 from src import sputils
 from src.pctransforms import OnUnitCube, PointcloudToTensor
 from src.qdataset import QuaternionFixedDataset, QuaternionTransform, rad_to_deg
@@ -57,7 +57,7 @@ def options(argv=None, parser=None):
 
     parser.add_argument('--loss-type', default=0, choices=[0, 1], type=int,
                         metavar='TYPE', help='Supervised (0) or Unsupervised (1)')
-    parser.add_argument('--sampler', required=True, choices=['fps', 'samplenet', 'random', 'none'], type=str,
+    parser.add_argument('--sampler', required=True, choices=['fps', 'samplenet', 'random', 'none', 'samplenetplus'], type=str,
                         help='Sampling method.')
 
     parser.add_argument('--transfer-from', type=str,
@@ -258,8 +258,9 @@ class Action:
             pcrnet_model.eval()
 
         # Create sampling network
-        if self.SAMPLER == "samplenet":
-            sampler = SampleNet(
+        if self.SAMPLER in ["samplenet", "samplenetplus"]:
+            SamplerNetwork = SampleNet if self.SAMPLER == "samplenet" else SampleNetPlus
+            sampler = SamplerNetwork(
                 num_out_points=self.NUM_OUT_POINTS,
                 bottleneck_size=self.BOTTLNECK_SIZE,
                 group_size=self.GROUP_SIZE,
