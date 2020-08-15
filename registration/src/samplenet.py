@@ -138,10 +138,11 @@ class SampleNet(nn.Module):
         if match is not None:
             match = match.contiguous()
 
-        if self.debug:
-            return simp, proj, match
-        else:
-            return proj if self.training else match
+        # if self.debug:
+        #     return simp, proj, match
+        # else:
+        #     return proj if self.training else match
+        return simp, proj
 
     def forward(self, x: torch.Tensor):
         # x shape should be B x 3 x N
@@ -212,8 +213,8 @@ class SampleNetPlus(SampleNet):
             skip_projection,
             debug,
         )
-        self.name = "samplenet_plus"
-        local_bottleneck_size = bottleneck_size // 2
+        # self.name = "samplenet_plus"
+        local_bottleneck_size = 32
 
         self.agg_conv1 = torch.nn.Conv1d(bottleneck_size + local_bottleneck_size, 128, 1)
         self.agg_conv2 = torch.nn.Conv1d(128, bottleneck_size, 1)
@@ -223,13 +224,13 @@ class SampleNetPlus(SampleNet):
 
         MLP = ops.DenseMLP if dense else ops.SharedMLP
         self.patch_encoder = MLP(
-            [3, 64, 64, local_bottleneck_size],
+            [3, 32, 32, local_bottleneck_size],
             bn=True,
             add_last_bn=True,
             add_last_activation=True,
         )
 
-        self.patcher = Patcher(k=32)
+        self.patcher = Patcher(k=16)
 
     def encode_local(self, x: torch.Tensor) -> torch.Tensor:
         patches = self.patcher(x)
