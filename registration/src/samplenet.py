@@ -9,9 +9,9 @@ import torch.nn.functional as F
 from knn_cuda import KNN
 
 import src.ops as ops
-from src.patcher import Patcher
 from src import sputils
 from src.chamfer_distance import ChamferDistance
+from src.patcher import Patcher
 from src.soft_projection import SoftProjection
 
 
@@ -135,14 +135,15 @@ class SampleNet(nn.Module):
         simp = simp.contiguous()
         if proj is not None:
             proj = proj.contiguous()
-        if match is not None:
+            out = proj
+        else:
             match = match.contiguous()
+            out = match
 
-        # if self.debug:
-        #     return simp, proj, match
-        # else:
-        #     return proj if self.training else match
-        return simp, proj
+        if self.debug:
+            return simp, proj, match
+        else:
+            return simp, out
 
     def forward(self, x: torch.Tensor):
         # x shape should be B x 3 x N
@@ -214,7 +215,7 @@ class SampleNetPlus(SampleNet):
             debug,
         )
         # self.name = "samplenet_plus"
-        local_bottleneck_size = 32
+        local_bottleneck_size = 16
 
         self.agg_conv1 = torch.nn.Conv1d(bottleneck_size + local_bottleneck_size, 128, 1)
         self.agg_conv2 = torch.nn.Conv1d(128, bottleneck_size, 1)
@@ -224,7 +225,7 @@ class SampleNetPlus(SampleNet):
 
         MLP = ops.DenseMLP if dense else ops.SharedMLP
         self.patch_encoder = MLP(
-            [3, 32, 32, local_bottleneck_size],
+            [3, 16, 16, local_bottleneck_size],
             bn=True,
             add_last_bn=True,
             add_last_activation=True,
@@ -235,7 +236,7 @@ class SampleNetPlus(SampleNet):
     def encode_local(self, x: torch.Tensor) -> torch.Tensor:
         patches = self.patcher(x)
         normalized_input_patches, _, _scale = ops.normalize_group(
-            patches, method="mean",
+            patches, scale=False, method="center",
         )
 
         # Encode patches
