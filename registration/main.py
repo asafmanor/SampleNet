@@ -241,6 +241,7 @@ class Action:
 
         self.SKIP_PROJECTION = args.skip_projection
         self.SAMPLER = args.sampler
+        self.FEATURE_TRANSFORM = args.feature_transform
 
         self.TRAIN_SAMPLENET = args.train_samplenet
         self.TRAIN_PCRNET = args.train_pcrnet
@@ -273,6 +274,7 @@ class Action:
                 input_shape="bnc",
                 output_shape="bnc",
                 skip_projection=self.SKIP_PROJECTION,
+                feature_transform=self.FEATURE_TRANSFORM,
             )
 
             if self.TRAIN_SAMPLENET:

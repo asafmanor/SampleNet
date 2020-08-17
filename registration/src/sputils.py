@@ -58,5 +58,8 @@ def get_parser():
     parser.add_argument("-gs", "--projection-group-size", type=int, default=8, help='Neighborhood size in Soft Projection [default: 8]')
     parser.add_argument("--lmbda", type=float, default=0.01, help="Projection regularization loss weight [default: 0.01]")
 
+    # pointnet arguments
+    parser.add_argument("--feature-transform", type=bool, default=False, help="Add feature transform (STN) in PointNet encoder [default: False]")
+
     return parser
 # fmt: on

@@ -134,7 +134,12 @@ def feature_transform_regularizer(trans):
     eye = torch.eye(d)[None, :, :]
     if trans.is_cuda:
         eye = eye.cuda()
-    loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2, 1)) - eye, dim=(1, 2)))
+
+    # TODO: when moving to pytorch 1.5+, we can remove the hacky batch error computation @ asaf 17/08/20
+    # loss = torch.mean(torch.norm(torch.bmm(trans, trans.transpose(2, 1)) - eye, dim=(1, 2)))
+    err = torch.bmm(trans, trans.transpose(2, 1)) - eye
+    batch_errors = [torch.norm(err[i]) for i in range(err.shape[0])]
+    loss = torch.mean(torch.stack(batch_errors))
     return loss
 
 

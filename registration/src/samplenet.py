@@ -13,13 +13,13 @@ from src import sputils
 from src.chamfer_distance import ChamferDistance
 from src.patcher import Patcher
 from src.soft_projection import SoftProjection
-from src.pointnet import PointNetfeat
+from src.pointnet import PointNetfeat, feature_transform_regularizer
 
 
 class _PointNetEncoder(nn.Module):
-    def __init__(self, bottleneck_size):
+    def __init__(self, bottleneck_size, feature_transform=False):
         super().__init__()
-        self.pointnet = PointNetfeat(bottleneck_size, global_feat=True, feature_transform=False)
+        self.pointnet = PointNetfeat(bottleneck_size, global_feat=True, feature_transform=feature_transform)
 
     def forward(self, x):
         y, trans, trans_feat = self.pointnet(x)
@@ -67,6 +67,7 @@ class SampleNet(nn.Module):
         skip_projection=False,
         global_encoder=_SampleNetEncoder,
         debug=False,
+        **kwargs,
     ):
         super().__init__()
         self.num_out_points = num_out_points
@@ -220,9 +221,9 @@ class SampleNetPlus(SampleNet):
         output_shape="bcn",
         complete_fps=True,
         skip_projection=False,
-        global_encoder=_SampleNetEncoder,
         debug=False,
         dense=False,
+        **kwargs,
     ):
         super().__init__(
             num_out_points,
@@ -235,8 +236,8 @@ class SampleNetPlus(SampleNet):
             output_shape,
             complete_fps,
             skip_projection,
-            global_encoder,
-            debug,
+            global_encoder=_SampleNetEncoder,
+            debug=debug,
         )
         # self.name = "samplenet_plus"
         local_bottleneck_size = 16
@@ -310,9 +311,11 @@ class SampleNetPN(SampleNet):
         output_shape="bcn",
         complete_fps=True,
         skip_projection=False,
-        global_encoder=_PointNetEncoder,
         debug=False,
+        feature_transform=False,
+        **kwargs,
     ):
+        global_encoder = lambda x: _PointNetEncoder(x, feature_transform=feature_transform)
         super().__init__(
             num_out_points,
             bottleneck_size,
@@ -328,9 +331,20 @@ class SampleNetPN(SampleNet):
             debug,
         )
 
+        self.trans_feat = None
+
     def encode_global(self, x):
-        y, trans, trans_feat = self.global_encoder(x)
+        y, trans, self.trans_feat = self.global_encoder(x)
         return y
+
+    def get_projection_loss(self):
+        sigma = super().get_projection_loss()
+        if self.trans_feat is not None:
+            reg = feature_transform_regularizer(self.trans_feat)  # TODO if proven useful, rewrite without passing through "self" @ asaf 17/08/20
+        else:
+            reg = torch.tensor(0).to(sigma)
+
+        return sigma + reg * 0.001
 
 
 if __name__ == "__main__":
@@ -339,7 +353,7 @@ if __name__ == "__main__":
     point_cloud = np.random.randn(BATCH_SIZE, 3, 1024)
     point_cloud_pl = torch.tensor(point_cloud, dtype=torch.float32).cuda()
     # net = SampleNet(NUM_OUT_POINTS, 128, group_size=10, initial_temperature=0.1, complete_fps=True, debug=True)
-    net = SampleNetPN(NUM_OUT_POINTS, 128, group_size=10, initial_temperature=0.1, complete_fps=True, debug=True)
+    net = SampleNetPN(NUM_OUT_POINTS, 128, group_size=10, initial_temperature=0.1, complete_fps=True, debug=True, feature_transform=True)
 
     net.cuda()
 
@@ -355,6 +369,8 @@ if __name__ == "__main__":
     simp = simp.detach().cpu().numpy()
     proj = proj.detach().cpu().numpy()
     match = match.detach().cpu().numpy()
+
+    proj_loss = net.get_projection_loss()
 
     print("*** SIMPLIFIED POINTS ***")
     print(simp)
