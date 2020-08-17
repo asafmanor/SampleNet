@@ -13,6 +13,43 @@ from src import sputils
 from src.chamfer_distance import ChamferDistance
 from src.patcher import Patcher
 from src.soft_projection import SoftProjection
+from src.pointnet import PointNetfeat
+
+
+class _PointNetEncoder(nn.Module):
+    def __init__(self, bottleneck_size):
+        super().__init__()
+        self.pointnet = PointNetfeat(bottleneck_size, global_feat=True, feature_transform=False)
+
+    def forward(self, x):
+        y, trans, trans_feat = self.pointnet(x)
+        return y, trans, trans_feat
+
+
+class _SampleNetEncoder(nn.Module):
+    def __init__(self, bottleneck_size, **kwargs):
+        super().__init__()
+        self.conv1 = nn.Conv1d(3, 64, 1)
+        self.conv2 = nn.Conv1d(64, 64, 1)
+        self.conv3 = nn.Conv1d(64, 64, 1)
+        self.conv4 = nn.Conv1d(64, 128, 1)
+        self.conv5 = nn.Conv1d(128, bottleneck_size, 1)
+
+        self.bn1 = nn.BatchNorm1d(64)
+        self.bn2 = nn.BatchNorm1d(64)
+        self.bn3 = nn.BatchNorm1d(64)
+        self.bn4 = nn.BatchNorm1d(128)
+        self.bn5 = nn.BatchNorm1d(bottleneck_size)
+
+    def forward(self, x):
+        y = F.relu(self.bn1(self.conv1(x)))
+        y = F.relu(self.bn2(self.conv2(y)))
+        y = F.relu(self.bn3(self.conv3(y)))
+        y = F.relu(self.bn4(self.conv4(y)))
+        y = F.relu(self.bn5(self.conv5(y)))  # batch x 128 x num_in_points
+
+        # Max pooling for global feature vector:
+        return torch.max(y, 2)[0]  # batch x 128
 
 
 class SampleNet(nn.Module):
@@ -28,23 +65,14 @@ class SampleNet(nn.Module):
         output_shape="bcn",
         complete_fps=True,
         skip_projection=False,
+        global_encoder=_SampleNetEncoder,
         debug=False,
     ):
         super().__init__()
         self.num_out_points = num_out_points
         self.name = "samplenet"
 
-        self.conv1 = torch.nn.Conv1d(3, 64, 1)
-        self.conv2 = torch.nn.Conv1d(64, 64, 1)
-        self.conv3 = torch.nn.Conv1d(64, 64, 1)
-        self.conv4 = torch.nn.Conv1d(64, 128, 1)
-        self.conv5 = torch.nn.Conv1d(128, bottleneck_size, 1)
-
-        self.bn1 = nn.BatchNorm1d(64)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.bn3 = nn.BatchNorm1d(64)
-        self.bn4 = nn.BatchNorm1d(128)
-        self.bn5 = nn.BatchNorm1d(bottleneck_size)
+        self.global_encoder = global_encoder(bottleneck_size)
 
         self.fc1 = nn.Linear(bottleneck_size, 256)
         self.fc2 = nn.Linear(256, 256)
@@ -77,17 +105,10 @@ class SampleNet(nn.Module):
         self.input_shape = input_shape
         self.output_shape = output_shape
 
-    def encode_global(self, x: torch.Tensor) -> torch.Tensor:
-        y = F.relu(self.bn1(self.conv1(x)))
-        y = F.relu(self.bn2(self.conv2(y)))
-        y = F.relu(self.bn3(self.conv3(y)))
-        y = F.relu(self.bn4(self.conv4(y)))
-        y = F.relu(self.bn5(self.conv5(y)))  # batch x 128 x num_in_points
+    def encode_global(self, x):
+        return self.global_encoder(x)
 
-        # Max pooling for global feature vector:
-        return torch.max(y, 2)[0]  # batch x 128
-
-    def project_and_match(self, x: torch.Tensor, simp: torch.Tensor) -> torch.Tensor:
+    def _project_and_match(self, x: torch.Tensor, simp: torch.Tensor) -> torch.Tensor:
         match = None
         proj = None
 
@@ -154,17 +175,18 @@ class SampleNet(nn.Module):
             raise RuntimeError("shape of x must be of [batch x 3 x num_in_points]")
 
         y = self.encode_global(x)
+
         y = F.relu(self.bn_fc1(self.fc1(y)))
         y = F.relu(self.bn_fc2(self.fc2(y)))
         y = F.relu(self.bn_fc3(self.fc3(y)))
         y = self.fc4(y)
 
         simp = y.view(-1, 3, self.num_out_points)
-        return self.project_and_match(x, simp)
+        return self._project_and_match(x, simp)
 
     # Losses:
     # At inference time, there are no sampling losses.
-    # When evaluating the model, we'd only want to asses the task loss.
+    # When evaluating the model, we'd only want to evaluate the task loss.
 
     def get_simplification_loss(self, ref_pc, samp_pc, pc_size, gamma=1, delta=0):
         if self.skip_projection or not self.training:
@@ -198,6 +220,7 @@ class SampleNetPlus(SampleNet):
         output_shape="bcn",
         complete_fps=True,
         skip_projection=False,
+        global_encoder=_SampleNetEncoder,
         debug=False,
         dense=False,
     ):
@@ -212,6 +235,7 @@ class SampleNetPlus(SampleNet):
             output_shape,
             complete_fps,
             skip_projection,
+            global_encoder,
             debug,
         )
         # self.name = "samplenet_plus"
@@ -270,7 +294,43 @@ class SampleNetPlus(SampleNet):
         y = self.fc4(y)
 
         simp = y.view(-1, 3, self.num_out_points)
-        return self.project_and_match(x, simp)
+        return self._project_and_match(x, simp)
+
+
+class SampleNetPN(SampleNet):
+    def __init__(
+        self,
+        num_out_points,
+        bottleneck_size,
+        group_size,
+        initial_temperature=1.0,
+        is_temperature_trainable=True,
+        min_sigma=1e-2,
+        input_shape="bcn",
+        output_shape="bcn",
+        complete_fps=True,
+        skip_projection=False,
+        global_encoder=_PointNetEncoder,
+        debug=False,
+    ):
+        super().__init__(
+            num_out_points,
+            bottleneck_size,
+            group_size,
+            initial_temperature,
+            is_temperature_trainable,
+            min_sigma,
+            input_shape,
+            output_shape,
+            complete_fps,
+            skip_projection,
+            global_encoder,
+            debug,
+        )
+
+    def encode_global(self, x):
+        y, trans, trans_feat = self.global_encoder(x)
+        return y
 
 
 if __name__ == "__main__":
@@ -279,7 +339,7 @@ if __name__ == "__main__":
     point_cloud = np.random.randn(BATCH_SIZE, 3, 1024)
     point_cloud_pl = torch.tensor(point_cloud, dtype=torch.float32).cuda()
     # net = SampleNet(NUM_OUT_POINTS, 128, group_size=10, initial_temperature=0.1, complete_fps=True, debug=True)
-    net = SampleNetPlus(NUM_OUT_POINTS, 128, group_size=10, initial_temperature=0.1, complete_fps=True, debug=True)
+    net = SampleNetPN(NUM_OUT_POINTS, 128, group_size=10, initial_temperature=0.1, complete_fps=True, debug=True)
 
     net.cuda()
 
