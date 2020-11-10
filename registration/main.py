@@ -208,8 +208,8 @@ def train(args, trainset, testset, action):
             save_checkpoint(snap, args.outfile, "snap_best")
             save_checkpoint(model.state_dict(), args.outfile, "model_best")
 
-        save_checkpoint(snap, args.outfile, "snap_last")
-        save_checkpoint(model.state_dict(), args.outfile, "model_last")
+        # save_checkpoint(snap, args.outfile, "snap_last")
+        # save_checkpoint(model.state_dict(), args.outfile, "model_last")
 
     LOGGER.debug("train, end")
 
