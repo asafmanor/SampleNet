@@ -19,7 +19,9 @@ from src.pointnet import PointNetfeat, feature_transform_regularizer
 class _PointNetEncoder(nn.Module):
     def __init__(self, bottleneck_size, feature_transform=False):
         super().__init__()
-        self.pointnet = PointNetfeat(bottleneck_size, global_feat=True, feature_transform=feature_transform)
+        self.pointnet = PointNetfeat(
+            bottleneck_size, global_feat=True, feature_transform=feature_transform
+        )
 
     def forward(self, x):
         y, trans, trans_feat = self.pointnet(x)
@@ -109,7 +111,7 @@ class SampleNet(nn.Module):
     def encode_global(self, x):
         return self.global_encoder(x)
 
-    def _project_and_match(self, x: torch.Tensor, simp: torch.Tensor) -> torch.Tensor:
+    def _project_and_match(self, x: torch.Tensor, simp: torch.Tensor) -> (torch.Tensor, torch.Tensor):
         match = None
         proj = None
 
@@ -167,7 +169,7 @@ class SampleNet(nn.Module):
         else:
             return simp, out
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> (torch.Tensor, torch.Tensor):
         # x shape should be B x 3 x N
         if self.input_shape == "bnc":
             x = x.permute(0, 2, 1)
@@ -242,7 +244,9 @@ class SampleNetPlus(SampleNet):
         # self.name = "samplenet_plus"
         local_bottleneck_size = 16
 
-        self.agg_conv1 = torch.nn.Conv1d(bottleneck_size + local_bottleneck_size, 128, 1)
+        self.agg_conv1 = torch.nn.Conv1d(
+            bottleneck_size + local_bottleneck_size, 128, 1
+        )
         self.agg_conv2 = torch.nn.Conv1d(128, bottleneck_size, 1)
 
         self.bn_agg1 = nn.BatchNorm1d(128)
@@ -261,7 +265,9 @@ class SampleNetPlus(SampleNet):
     def encode_local(self, x: torch.Tensor) -> torch.Tensor:
         patches = self.patcher(x)
         normalized_input_patches, _, _scale = ops.normalize_group(
-            patches, scale=False, method="center",
+            patches,
+            scale=False,
+            method="center",
         )
 
         # Encode patches
@@ -280,11 +286,15 @@ class SampleNetPlus(SampleNet):
 
         # Encode global and local feature vectore
         local_feature_vectors = self.encode_local(x)  # [B, bottleneck_size, N]
-        global_feature_vector = torch.unsqueeze(self.encode_global(x), dim=2)  # [B, bottleneck_size, 1]
+        global_feature_vector = torch.unsqueeze(
+            self.encode_global(x), dim=2
+        )  # [B, bottleneck_size, 1]
         global_feature_vector = global_feature_vector.expand(-1, -1, N)
 
         # Aggregate feature vectors
-        y = torch.cat([local_feature_vectors, global_feature_vector], dim=1)  # [B, bottleneck_size*2, N]
+        y = torch.cat(
+            [local_feature_vectors, global_feature_vector], dim=1
+        )  # [B, bottleneck_size*2, N]
         y = F.relu(self.bn_agg1(self.agg_conv1(y)))
         y = F.relu(self.bn_agg2(self.agg_conv2(y)))
         y = torch.max(y, 2)[0]  # batch x 128
@@ -315,7 +325,9 @@ class SampleNetPN(SampleNet):
         feature_transform=False,
         **kwargs,
     ):
-        global_encoder = lambda x: _PointNetEncoder(x, feature_transform=feature_transform)
+        global_encoder = lambda x: _PointNetEncoder(
+            x, feature_transform=feature_transform
+        )
         super().__init__(
             num_out_points,
             bottleneck_size,
@@ -340,7 +352,9 @@ class SampleNetPN(SampleNet):
     def get_projection_loss(self):
         sigma = super().get_projection_loss()
         if self.trans_feat is not None:
-            reg = feature_transform_regularizer(self.trans_feat)  # TODO if proven useful, rewrite without passing through "self" @ asaf 17/08/20
+            reg = feature_transform_regularizer(
+                self.trans_feat
+            )  # TODO if proven useful, rewrite without passing through "self" @ asaf 17/08/20
         else:
             reg = torch.tensor(0).to(sigma)
 
@@ -353,7 +367,15 @@ if __name__ == "__main__":
     point_cloud = np.random.randn(BATCH_SIZE, 3, 1024)
     point_cloud_pl = torch.tensor(point_cloud, dtype=torch.float32).cuda()
     # net = SampleNet(NUM_OUT_POINTS, 128, group_size=10, initial_temperature=0.1, complete_fps=True, debug=True)
-    net = SampleNetPN(NUM_OUT_POINTS, 128, group_size=10, initial_temperature=0.1, complete_fps=True, debug=True, feature_transform=True)
+    net = SampleNetPN(
+        NUM_OUT_POINTS,
+        128,
+        group_size=10,
+        initial_temperature=0.1,
+        complete_fps=True,
+        debug=True,
+        feature_transform=True,
+    )
 
     net.cuda()
 
