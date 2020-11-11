@@ -15,3 +15,4 @@ log/
 dump/
 *.o
 *.so
+checkpoints/
